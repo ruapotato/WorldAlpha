@@ -1,42 +1,90 @@
 # worldalpha/entities/base.py
-from ursina import Entity, Vec3
-from typing import Dict, Tuple
+from ursina import Entity, Vec3, raycast, time
+from typing import Dict, Tuple, Optional
 
 class GameEntity(Entity):
-    """Base class for all game entities with physics and collision handling"""
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self._setup_physics()
+        self._setup_collision()
+
+    def _setup_physics(self):
         self.velocity = Vec3(0, 0, 0)
+        self.gravity = 1
         self.grounded = False
-        self.collision_shape = 'box'  # or 'sphere', 'capsule', etc.
         self.collision_height = 1
         self.collision_radius = 0.5
 
-    def check_collision(self, direction: Vec3, distance: float) -> bool:
-        """Check for collision in given direction"""
+    def _setup_collision(self):
+        self.collision_rays = {
+            'down': (Vec3(0, -1, 0), 2.1),
+            'up': (Vec3(0, 1, 0), 1),
+            'body': (Vec3(0, 0, 0), 0.5)
+        }
+
+    def check_collision(self, direction: Vec3, distance: float) -> Tuple[bool, Optional[Vec3]]:
         hit_info = raycast(
             self.position + Vec3(0, self.collision_height/2, 0),
             direction,
             distance=distance,
             ignore=[self]
         )
-        return hit_info.hit
+        return hit_info.hit, hit_info.normal if hit_info.hit else None
+
+    def check_ground(self):
+        positions = [
+            self.position,
+            self.position + Vec3(0.3, 0, 0.3),
+            self.position + Vec3(-0.3, 0, 0.3),
+            self.position + Vec3(0.3, 0, -0.3),
+            self.position + Vec3(-0.3, 0, -0.3)
+        ]
+        
+        min_distance = float('inf')
+        for pos in positions:
+            hit_info = raycast(
+                pos + Vec3(0, 0.1, 0),
+                self.collision_rays['down'][0],
+                distance=self.collision_rays['down'][1],
+                ignore=[self]
+            )
+            if hit_info.hit:
+                min_distance = min(min_distance, hit_info.distance)
+        
+        return min_distance if min_distance != float('inf') else None
+
+    def check_head(self):
+        hit_info = raycast(
+            self.position + Vec3(0, 1, 0),
+            self.collision_rays['up'][0],
+            distance=self.collision_rays['up'][1],
+            ignore=[self]
+        )
+        return hit_info.distance if hit_info.hit else None
+
+    def handle_physics(self):
+        ground_distance = self.check_ground()
+        self.grounded = ground_distance is not None and ground_distance <= 1.1
+        
+        if not self.grounded:
+            self.y -= self.gravity * time.dt
+        else:
+            if ground_distance < 1:
+                self.y += (1 - ground_distance)
+        
+        head_distance = self.check_head()
+        if head_distance is not None and head_distance < 0.5:
+            self.y -= (0.5 - head_distance)
 
     def move(self, direction: Vec3, speed: float):
-        """Move entity with collision detection"""
         if direction.length() > 0:
             direction = direction.normalized()
             intended_pos = self.position + direction * speed * time.dt
             
-            if not self.check_collision(direction, speed * time.dt):
+            hit, normal = self.check_collision(direction, speed * time.dt)
+            if not hit:
                 self.position = intended_pos
             else:
-                # Try sliding along walls
-                for axis in ['x', 'z']:
-                    dir_component = Vec3(0, 0, 0)
-                    setattr(dir_component, axis, getattr(direction, axis))
-                    if dir_component.length() > 0 and not self.check_collision(
-                        dir_component.normalized(),
-                        speed * time.dt
-                    ):
-                        self.position += dir_component.normalized() * speed * time.dt * 0.7
+                slide_direction = (direction - normal * direction.dot(normal)).normalized()
+                if slide_direction.length() > 0:
+                    self.position += slide_direction * speed * time.dt * 0.7

@@ -1,98 +1,41 @@
 # entities/player.py
-from ursina.prefabs.first_person_controller import FirstPersonController
-from ursina import Vec3, Vec2, held_keys, mouse, time, raycast, clamp
-import sys
-import os
-
-# Add the project root directory to Python path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
+from ursina import Vec3, Vec2, held_keys, mouse, time, clamp
+from .base import GameEntity
 from core.constants import (
     PLAYER_HEIGHT,
     PLAYER_SPEED,
     PLAYER_JUMP_HEIGHT,
-    PLAYER_JUMP_DURATION,
     PLAYER_MOUSE_SENSITIVITY
 )
 
-class CustomFirstPersonController(FirstPersonController):
+class CustomFirstPersonController(GameEntity):
     def __init__(self, **kwargs):
+        from ursina import Entity, camera
         super().__init__(**kwargs)
-        self._setup_physics()
-        self._setup_collision()
-        self._setup_movement()
         
-    def _setup_physics(self):
-        self.gravity = 1
-        self.jump_height = PLAYER_JUMP_HEIGHT
-        self.jump_duration = PLAYER_JUMP_DURATION
-        self.jumping = False
-        self.grounded = False
-        self.height = PLAYER_HEIGHT
-        
-    def _setup_collision(self):
-        self.collision_rays = {
-            'down': (Vec3(0, -1, 0), 2.1),    # Ground check
-            'up': (Vec3(0, 1, 0), 1),         # Ceiling check
-            'body': (Vec3(0, 0, 0), 0.5)      # Body collision sphere
-        }
-        
-    def _setup_movement(self):
+        # Create camera pivot
+        self.camera_pivot = Entity(parent=self, y=2)
+        # Reset camera
+        camera.world_position = (0,0,0)
+        camera.z = -5
+        camera.y = 2
+        camera.parent = self.camera_pivot
+        camera.fov = 90
+        mouse.locked = True
+        self._setup_player()
+
+    def _setup_player(self):
         self.speed = PLAYER_SPEED
+        self.jump_height = PLAYER_JUMP_HEIGHT
+        self.height = PLAYER_HEIGHT
         self.mouse_sensitivity = Vec2(*PLAYER_MOUSE_SENSITIVITY)
+        self.jumping = False
         
-    def check_ground(self):
-        positions = [
-            self.position,
-            self.position + Vec3(0.3, 0, 0.3),
-            self.position + Vec3(-0.3, 0, 0.3),
-            self.position + Vec3(0.3, 0, -0.3),
-            self.position + Vec3(-0.3, 0, -0.3)
-        ]
-        
-        min_distance = float('inf')
-        for pos in positions:
-            hit_info = raycast(
-                pos + Vec3(0, 0.1, 0),
-                self.collision_rays['down'][0],
-                distance=self.collision_rays['down'][1],
-                ignore=[self,]
-            )
-            if hit_info.hit:
-                min_distance = min(min_distance, hit_info.distance)
-        
-        return min_distance if min_distance != float('inf') else None
-    
-    def check_head(self):
-        hit_info = raycast(
-            self.position + Vec3(0, 1, 0),
-            self.collision_rays['up'][0],
-            distance=self.collision_rays['up'][1],
-            ignore=[self,]
-        )
-        return hit_info.distance if hit_info.hit else None
-    
     def update(self):
-        self._handle_physics()
+        self.handle_physics()
         self._handle_movement()
         self._handle_camera()
         
-    def _handle_physics(self):
-        # Ground check and gravity
-        ground_distance = self.check_ground()
-        self.grounded = ground_distance is not None and ground_distance <= 1.1
-        
-        if not self.grounded:
-            self.y -= self.gravity * time.dt
-        else:
-            if ground_distance < 1:
-                self.y += (1 - ground_distance)
-        
-        # Ceiling collisions
-        head_distance = self.check_head()
-        if head_distance is not None and head_distance < 0.5:
-            self.y -= (0.5 - head_distance)
-            
     def _handle_movement(self):
         self.direction = Vec3(
             self.forward * (held_keys['w'] - held_keys['s']) +
@@ -100,26 +43,8 @@ class CustomFirstPersonController(FirstPersonController):
         ).normalized()
         
         if self.direction:
-            intended_pos = self.position + (self.direction * self.speed * time.dt)
-            
-            hit_info = raycast(
-                self.position + Vec3(0, 0.5, 0),
-                self.direction,
-                distance=self.speed * time.dt + 0.5,
-                ignore=[self,]
-            )
-            
-            if hit_info.hit:
-                wall_normal = hit_info.normal
-                slide_direction = (self.direction - wall_normal * 
-                                 self.direction.dot(wall_normal)).normalized()
-                
-                if slide_direction.length() > 0:
-                    self.position += slide_direction * self.speed * time.dt * 0.7
-            else:
-                self.position = intended_pos
+            self.move(self.direction, self.speed)
         
-        # Jumping
         if self.grounded and held_keys['space']:
             self.y += self.jump_height
             self.jumping = True
