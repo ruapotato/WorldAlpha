@@ -1,0 +1,4 @@
+# Ignore pyc files
+*.pyc
+# Ignore pyenv directory
+pyenv/
