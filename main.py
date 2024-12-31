@@ -2,7 +2,7 @@
 from ursina import *
 from terrain.chunk import TerrainChunk
 from terrain.biomes import BiomeManager
-from entities.player import CustomFirstPersonController
+from entities.player import CharacterController
 from core.constants import VIEW_DISTANCE, CHUNK_SIZE
 from terrain.chunk_manager import ChunkManager
 import math
@@ -17,6 +17,14 @@ class WorldAlpha(Entity):
         self.chunk_manager = ChunkManager(CHUNK_SIZE, self.biome_manager)
         self.frame_counter = 0
         self.last_time = time.time()
+        
+        # Initialize center chunk before setup
+        print("Initializing center chunk...")
+        self.chunk_manager.request_chunk((0, 0), 0)
+        self.chunk_manager.process_queued_chunks()
+        while (0, 0) not in self.chunk_manager.chunks:
+            self.chunk_manager.process_queued_chunks()
+            
         self.setup_game()
 
     def setup_game(self):
@@ -48,19 +56,18 @@ class WorldAlpha(Entity):
         print("Initial chunks requested")
 
     def _spawn_player(self):
-        print("Spawning player...")
-        # Get center chunk height if available
-        center_chunk = self.chunk_manager.chunks.get((0, 0))
-        if center_chunk and hasattr(center_chunk, 'get_height_at'):
-            spawn_height = center_chunk.get_height_at(CHUNK_SIZE//2, CHUNK_SIZE//2)
-        else:
-            spawn_height = 100
+        center_chunk = self.chunk_manager.chunks[(0, 0)]
+        spawn_height = max(v.y for v in center_chunk.model.vertices) + 2
             
-        self.player = CustomFirstPersonController(
-            position=Vec3(0, spawn_height + 2, 0),
+        self.player = CharacterController(
+            position=Vec3(0, spawn_height, 0),
         )
-        print(f"Player spawned at height: {spawn_height}")
-
+        self.player.physics_enabled = False
+    
+    def enable_player_physics(self):
+        if hasattr(self, 'player'):
+            self.player.physics_enabled = True
+    
     def _setup_ui(self):
         print("Setting up UI...")
         self.fps_text = Text(text='FPS: 0', position=(-.85, .45))
